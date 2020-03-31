@@ -1,0 +1,155 @@
+---
+title: "Helium_Gibbs"
+output: pdf_document
+author: A. Mehta, A. Cheekoti, A. Tayade
+---
+
+Chunk 1: Defining global parameters.
+```{r}
+rm(list=ls())
+alpha_inc = 0.05                  # Incrememnt in alpha values
+num_alphas=10                   # Total number of alphas 
+
+num_walkers=100                   # Number of walkers
+num_steps=10000                   # Number of total steps by each walker (thermalisation + sampling)
+therm_steps=0.2*num_steps
+
+slice_step = 2                         # step size for slicing
+
+
+```
+
+Chunk 2: Defining functions for norm of vector, sampling and local energy.
+```{r}
+# Function to calculate norm of a vector
+norm_vec <- function(r) {return(sqrt(sum(r^2)))}
+
+#Funtion to calculate the distance between two vecors/points
+r12<- function(r1,r2) {return(norm_vec(r1-r2))}
+
+# Function to sample position values from (Psi^2/<Psi|Psi>)
+rho <- function(r1,r2,alpha) {
+  value_r12=r12(r1,r2)
+  return (exp(2*(-2*norm_vec(r1) - 2*norm_vec(r2) + (value_r12/(2 + (2*alpha*value_r12) )) )))
+}
+
+
+#Slice sampler for r1
+slice_r <- function(r1,r2,alpha,slice_step,var_num,r_num){
+        r_both=matrix(c(r1,r2),nrow=2,ncol=3, byrow = TRUE)
+        
+        r_in = r_both[r_num,][var_num] 
+        const = runif( 1 ,0, rho(r_both[1,],r_both[2,],alpha) )
+
+        #Here end1 is the lower limit and end2 is the upper limit
+        in_step_end1=runif(1,0,slice_step)
+        
+        end1 = r_both[r_num,][var_num] = r_in - in_step_end1
+        while (const < rho(r_both[1,],r_both[2,],alpha) ) {
+              end1 = r_both[r_num,][var_num] = r_both[r_num,][var_num] - slice_step
+            }    
+
+        end2 =  r_both[r_num,][var_num] = r_in + (slice_step-in_step_end1)
+        while ( const < rho(r_both[1,],r_both[2,],alpha) ) {
+              end2 = r_both[r_num,][var_num] = r_both[r_num,][var_num] + slice_step
+        }
+  
+        point_new = runif(1,end1,end2)
+        r_both[r_num,][var_num] = point_new
+ 
+        while(const > rho(r_both[1,],r_both[2,],alpha)){
+              if ( point_new < r_in ) {
+                    end1 = point_new
+                  } else{end2 = point_new}
+
+        point_new = runif(1,end1,end2)
+        r_both[r_num,][var_num] = point_new
+        }
+ 
+      return(point_new)
+}
+
+# Function to calculate local energy
+elocal <- function(r1,r2,alpha) {
+  value_r12=r12(r1,r2)
+  denom= 1 + (alpha*value_r12)
+  elocal = -4 - (1/(value_r12*(denom^3))) - (1/(4*(denom^4))) + (1/value_r12) +(((r1-r2)%*%((r1/norm_vec(r1))-(r2/norm_vec(r2))))/ (value_r12*denom^2))
+  return (elocal)
+}
+```
+
+Chunk 3: Executing variational monte carlo with calculation of local energy and variance.
+```{r}
+alpha = 0.05                       # Initial value of alpha (variable parameter)
+
+E_local_sum_all = c()
+E_local_sqd_sum_all = c()
+dE_trial_all=c()
+alpha_all=c()
+
+#matrix to contain the E_trail calculated from each walker for every alpha
+E_trial_all = matrix(0,nrow=num_alphas,ncol = num_walkers) 
+
+for (i in seq(num_alphas)){ #For different alphas
+alpha_all = c(alpha_all,alpha)
+E_local_sum_one_alpha = 0
+E_local_sqd_sum_one_alpha = 0
+  
+for (j in seq(num_walkers)){
+cat(j-1, "of", num_alphas * num_walkers, "walkers calculated.","\n")
+r1_sample = c()
+r2_sample = c()
+
+r_both = matrix(runif(6,0,2),2,3, byrow=TRUE)
+
+for (k in seq(num_steps)){
+
+for(r_num in seq(2)){
+for (var_num in seq(3)){
+
+r_both[r_num,][var_num] = slice_r(r_both[1,],r_both[2,],alpha,slice_step, var_num, r_num)
+
+}
+}
+
+r1_sample = rbind(r1_sample,r_both[1,])
+r2_sample = rbind(r2_sample,r_both[2,])
+}#one walker
+
+E_local_one_walker=c()
+for (l in seq(num_steps-therm_steps)){
+          E_local_one_walker          =c(E_local_one_walker,elocal(r1_sample[(l+therm_steps),],r2_sample[(l+therm_steps),],alpha))         # array of one particular walker, energies for all x        
+          }
+
+E_local_sum_one_alpha = E_local_sum_one_alpha + sum(E_local_one_walker)     #Adding all local energy for all x, all walkers, one alpha
+      
+E_local_sqd_sum_one_alpha = E_local_sqd_sum_one_alpha + sum(E_local_one_walker^2)
+
+#cat(i, "of", num_alphas, "alphas calculated.","\n")
+}#one alpha
+
+#array containing elocal for different alphas
+E_local_sum_all= c(E_local_sum_all,E_local_sum_one_alpha)  
+#array containing elocal^2 for diff. alphas
+E_local_sqd_sum_all = c(E_local_sqd_sum_all,E_local_sqd_sum_one_alpha) 
+  
+alpha = alpha + alpha_inc
+cat(i, "of", num_alphas, "alphas calculated.","\n")
+  
+}#all alphas done
+
+E_local_var = E_local_sqd_sum_all/(num_walkers*(num_steps-therm_steps)) - (E_local_sum_all/(num_walkers*(num_steps-therm_steps)))^2
+
+E_local_all = E_local_sum_all/(num_walkers*(num_steps-therm_steps))
+std_dev = sqrt(E_local_var)
+error = std_dev/sqrt(num_walkers*(num_steps-therm_steps))
+
+```
+
+Chunk 4: Main plots of our analysis.
+```{r}
+plot(alpha_all,E_local_var,xlab="alpha",ylab="Variance", main = "Variance vs alpha")
+plot(alpha_all,E_local_all,xlab="alpha", ylab="Local Energy",ylim=range(c(E_local_all-error, E_local_all+error)), main = "Local energy vs alpha")
+arrows(alpha_all, E_local_all-error, alpha_all, E_local_all+error , length=0.05, angle=90, code=3)
+```
+

@@ -1,0 +1,163 @@
+---
+title: "Hydrogen_Gibbs"
+output: pdf_document
+author: A. Mehta, A. Cheekoti, A. Tayade
+---
+
+Chunk 1: Defining global parameters.
+```{r}
+alpha_inc = 0.1                  # Incrememnt in alpha values
+num_alphas = 10                  # Total number of alphas 
+
+num_walkers=20                   # Number of walkers
+num_steps=5000                   # Number of total steps by each walker 
+
+
+slice_step = 2                  # step size for slicing
+N_dim = 3
+
+```
+
+Chunk 2: Defining functions for norm of vector, sampling and local energy.
+```{r}
+# Function to calculate norm of a vector
+norm_vec <- function(x) sqrt(sum(x^2))
+
+# Function to sample position values from (Psi^2/<Psi|Psi>)
+rho <- function(x,alpha) {
+  return (norm_vec(x)^(3-N_dim)*exp(-2*alpha*(norm_vec(x)))/(2*alpha))
+}
+
+# Function to calculate local energy
+elocal <- function(x,alpha) {
+  return (-0.5*(alpha^2 - 2*(alpha/x)) - 1/x)
+}
+
+
+#Slice sampler for r1
+slice_r1 <- function(r1,alpha, slice_step,var_num){
+        r1_in = r1[var_num] 
+        const = runif( 1 ,0, rho(r1,alpha) )
+  
+        #Here end1 is the lower limit and end2 is the upper limit
+        end1 = r1[var_num] = r1_in - slice_step
+
+        while (const < rho(r1,alpha) ) {
+              r1[var_num] = r1[var_num] - slice_step
+              end1 = r1[var_num]
+            }    
+
+        end2 =  r1[var_num] = r1_in + slice_step
+        while ( const < rho(r1,alpha) ) {
+              r1[var_num] = r1[var_num] + slice_step
+              end2 = r1[var_num]
+            }
+  
+        point_new = runif(1,end1,end2)
+        r1[var_num] = point_new
+ 
+        while(const > rho(r1,alpha)){
+              if ( point_new < r1_in ) {
+                    end1 = point_new
+                  } else{end2 = point_new}
+
+        point_new = runif(1,end1,end2)
+        r1[var_num] = point_new
+        }
+ 
+      return(point_new)
+}
+
+```
+
+Chunk 3: Executing variational monte carlo with calculation of local energy and variance.
+```{r}
+alpha = 0.5                       # Initial value of alpha (variable parameter)
+
+E_local_sum_all = c()
+E_local_sqd_sum_all = c()
+dE_trial_all=c()
+alpha_all=c()
+
+#matrix to contain the E_trail calculated from each walker for every alpha
+E_trial_all = matrix(0,nrow=num_alphas,ncol = num_walkers) 
+
+for (i in seq(num_alphas)){ #For different alphas
+alpha_all = c(alpha_all,alpha)
+E_local_sum_one_alpha = 0
+E_local_sqd_sum_one_alpha = 0
+  
+for (j in seq(num_walkers)){
+
+point_all_x1 = c()
+point_all_y1 = c()
+point_all_z1 = c()
+
+
+r1 =runif(3,0,2)      #initial positions of the walkers
+
+for (k in seq(num_steps)){
+
+var_num = 1
+
+point_new_x1 = slice_r1(r1,alpha,slice_step,var_num)
+r1[var_num] = point_new_x1
+#print(point_new_x1)
+point_all_x1 = c(point_all_x1,point_new_x1)
+
+point_new_y1 = slice_r1(r1,alpha,slice_step,var_num+1)
+r1[var_num+1] = point_new_y1
+#print(point_new_y1)
+point_all_y1 = c(point_all_y1,point_new_y1)
+
+point_new_z1 = slice_r1(r1,alpha,slice_step,var_num+2)
+r1[var_num+2] = point_new_z1
+#print(point_new_z1)
+point_all_z1 = c(point_all_z1,point_new_z1)
+
+
+}
+
+#hist(point_all_x1)
+#hist(point_all_y1)
+#hist(point_all_z1)
+
+
+r1_all = sqrt(point_all_x1^2 + point_all_y1^2 + point_all_z1^2)
+
+
+
+E_local_one_walker=c()
+E_local_one_walker =c(E_local_one_walker,elocal(r1_all,alpha))     # array of one particular walker, energies for all x        
+
+E_local_sum_one_alpha = E_local_sum_one_alpha + sum(E_local_one_walker)     #Adding all local energy for all x, all walkers, one alpha
+      
+E_local_sqd_sum_one_alpha = E_local_sqd_sum_one_alpha + sum(E_local_one_walker^2)
+
+}
+
+#array containing elocal for different alphas
+E_local_sum_all= c(E_local_sum_all,E_local_sum_one_alpha)  
+#array containing elocal^2 for diff. alphas
+E_local_sqd_sum_all = c(E_local_sqd_sum_all,E_local_sqd_sum_one_alpha) 
+  
+alpha = alpha + alpha_inc
+cat(i, "of", num_alphas, "alphas calculated.","\n")
+  
+}
+
+E_local_var = E_local_sqd_sum_all/(num_walkers*num_steps) - (E_local_sum_all/(num_walkers*num_steps))^2
+
+E_local_all = E_local_sum_all/(num_walkers*num_steps)
+std_dev = sqrt(E_local_var)
+error = std_dev/sqrt(num_walkers*num_steps)
+
+```
+
+Chunk 4: Main plots of our analysis.
+```{r}
+plot(alpha_all,E_local_var,xlab="alpha",ylab="Variance", main = "Variance vs alpha")
+plot(alpha_all,E_local_all,xlab="alpha", ylab="Local Energy",ylim=range(c(E_local_all-error, E_local_all+error)), main = "Local energy vs alpha")
+arrows(alpha_all, E_local_all-error, alpha_all, E_local_all+error , length=0.05, angle=90, code=3)
+plot(alpha_all,E_local_all)
+```
