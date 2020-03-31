@@ -1,0 +1,164 @@
+---
+title: "Helium_FP"
+output: html_notebook
+author: A. Mehta, A. Cheekoti, A. Tayade
+---
+
+Chunk 1: Defining global parameters.
+```{r}
+rm(list=ls())
+
+alpha_inc = 0.05                  # Incrememnt in alpha values
+num_alphas=10                     # Total number of alphas 
+
+num_walkers=100                    # Number of walkers
+num_steps=10000                   # Number of total steps by each walker (thermalisation + sampling)
+therm_steps=0.2*num_steps         # Number of thermalisation steps
+
+del_t=0.1                          
+therm_interval=(therm_steps)/10   # Interval size to adjust step size
+```
+
+Chunk 2: Defining functions for norm of vector, sampling and local energy.
+```{r}
+# Function to calculate norm of a vector
+norm_vec <- function(r) {return(sqrt(sum(r^2)))}
+
+#Funtion to calculate the distance between two vecors/points
+r12<- function(r1,r2) {return(norm_vec(r1-r2))}
+
+# Function to sample position values from (Psi^2/<Psi|Psi>)
+rho <- function(r1,r2,alpha) {
+  value_r12=r12(r1,r2)
+  return (exp(2*(-2*norm_vec(r1) - 2*norm_vec(r2) + (value_r12/(2 + 2*alpha*value_r12 )) )))
+}
+
+# Function to calculate local energy
+elocal <- function(r1,r2,alpha) {
+  value_r12=r12(r1,r2)
+  denom= 1 + alpha*value_r12
+  elocal = -4 - (1/(value_r12*(denom^3))) - (1/(4*(denom^4))) + (1/value_r12) +(((r1-r2)%*%((r1/norm_vec(r1))-(r2/norm_vec(r2))))/ (value_r12*denom^2))
+  return (elocal)
+  }
+#Force
+F_fp <-function(r1,r2,alpha) {
+  value_r12=r12(r1,r2)
+        denom= 1 + alpha*value_r12
+    forc = 2*( -(2*r1/norm_vec(r1)) - ((0.5*alpha*(r1-r2))/(denom)^2) + (0.5*(r1-r2)/(denom*value_r12))  )
+  return(forc)
+}
+#Green's function
+G_fp <-function(x1,x2,y1,y2,del_t,alpha){
+  power=sum((c(y1,y2)-c(x1,x2)-(c(F_fp(x1,x2,alpha),F_fp(x2,x1,alpha))*del_t/2))^2)
+   return( exp(-power/(del_t*2)) / ((2*pi*del_t)^(6/2)) )         # 6 - Number of degrees of freedom
+}  
+```
+
+Chunk 3: Executing variational monte carlo with calculation of local energy and variance.
+```{r}
+alpha = 0.05                       # Initial value of alpha (variable parameter)
+
+E_local_sum_all = c()
+E_local_sqd_sum_all = c()
+
+alpha_all=c()
+
+r1_sample_all=c()
+r2_sample_all=c()
+
+#matrix to contain the acceptance rate of each walker for every alpha
+accept_rate_all = matrix(0,nrow=num_alphas,ncol = num_walkers) 
+
+for (i in seq(num_alphas)){ #For different alphas
+  
+  alpha_all = c(alpha_all,alpha)
+  E_local_sum_one_alpha = 0
+  E_local_sqd_sum_one_alpha = 0
+  
+  for (j in seq(num_walkers)){
+   
+      r1_sample=c()
+      r2_sample=c()
+      r1=runif(3,-2,+2)      #initial positions of the walkers
+      r2=runif(3,-2,+2)
+      accept=0
+      
+      for(k in seq(num_steps)){    #Generate r_samples for each walker
+        
+            r1_dum= r1 + (F_fp(r1,r2,alpha)*del_t/2) + (rnorm(3)*sqrt(del_t))
+            r2_dum= r2 + (F_fp(r2,r1,alpha)*del_t/2) + (rnorm(3)*sqrt(del_t))
+            
+            ratio = ( G_fp(r1_dum,r2_dum,r1,r2,del_t,alpha) * rho(r1_dum,r2_dum,alpha) ) / ( G_fp(r1,r2,r1_dum,r2_dum,del_t,alpha) * rho(r1,r2,alpha) )
+            
+            if (ratio>=runif(1,0,1)){
+                  
+                  r1_sample = rbind(r1_sample,r1_dum)
+                  r2_sample = rbind(r2_sample,r2_dum)
+                  r1=r1_dum
+                  r2=r2_dum
+                  accept = accept + 1
+            } else{r1_sample = rbind(r1_sample,r1)
+                  r2_sample = rbind(r2_sample,r2)}
+            
+            #Thermalisation steps &&
+            #Changes in step size after uniform intervals
+            if (k<=therm_steps && k%%therm_interval==0){
+                del_t= del_t*((10/9)*(accept/therm_interval))
+                accept=0
+            }
+        
+        } #one walker
+      
+      E_local_one_walker=c()
+      for (l in seq(num_steps-therm_steps)){
+          E_local_one_walker          =c(E_local_one_walker,elocal(r1_sample[(therm_steps+l),],r2_sample[(therm_steps+l),],alpha))         # array of one particular walker, energies for all x        
+          }
+      E_local_sum_one_alpha = E_local_sum_one_alpha + sum(E_local_one_walker)     #Adding all local energy for all x, all walkers, one aplha
+      
+      E_local_sqd_sum_one_alpha = E_local_sqd_sum_one_alpha + sum(E_local_one_walker^2)
+      
+      #old approach
+      accept_rate_all[i,j]=accept/(num_steps-therm_steps)
+    
+    }#one alpha  
+  
+  #array containing elocal for different alphas
+  E_local_sum_all= c(E_local_sum_all,E_local_sum_one_alpha)  
+  #array containing elocal^2 for diff. alphas
+  E_local_sqd_sum_all = c(E_local_sqd_sum_all,E_local_sqd_sum_one_alpha) 
+  
+  alpha = alpha + alpha_inc
+  cat(i, "of", num_alphas, "alphas calculated.","\n")
+}
+
+E_local_var = E_local_sqd_sum_all/(num_walkers*(num_steps-therm_steps)) - (E_local_sum_all/(num_walkers*(num_steps-therm_steps)))^2
+
+E_local_all = E_local_sum_all/(num_walkers*(num_steps-therm_steps))
+std_dev = sqrt(E_local_var)
+error = std_dev/sqrt(num_walkers*(num_steps-therm_steps))
+
+```
+
+Chunk 4: Main plots of our analysis.
+```{r}
+plot(alpha_all,rowMeans(accept_rate_all),xlab="alpha",ylab="Acceptance rate", main = "Acceptance rate vs alpha")
+plot(alpha_all,E_local_var,xlab="alpha",ylab="Variance", main = "Variance vs alpha")
+
+plot(alpha_all,E_local_all,xlab="alpha", ylab="Local Energy",ylim=range(c(E_local_all-error, E_local_all+error)), main = "Local energy vs alpha")
+arrows(alpha_all, E_local_all-error, alpha_all, E_local_all+error , length=0.05, angle=90, code=3)
+```
+
+Chunk 5: Additional plots for reference.
+```{r}
+#hist(x_sample)
+plot(alpha_all,rowMeans(E_trial_all),xlab="alpha",ylab="Mean Local Energy")
+plot(alpha_all,rowMeans(E_trial_all),xlab="alpha",ylab="Mean Local Energy",ylim=range(c(E_local_all-error, E_local_all+error)))
+arrows(alpha_all, E_local_all-error, alpha_all, E_local_all+error , length=0.05, angle=90, code=3)
+
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.

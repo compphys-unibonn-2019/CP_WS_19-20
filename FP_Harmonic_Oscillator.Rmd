@@ -1,0 +1,128 @@
+---
+title: "Harmonic_Oscillator_FP"
+author: "A.Mehta,A.Cheekoti,A.Tayada"
+output: pdf_document
+---
+
+
+Chunk 1: Defining global parameters.
+
+```{r}
+rm(list=ls())
+N_dim = 1                         # Number of dimensions, only possible value 1
+
+alpha_inc = 0.1                  # Incrememnt in alpha values
+num_alphas=1                     # Total number of alphas 
+del_t=0.0001
+num_walkers=1                    # Number of walkers
+num_steps=100                   # Number of total steps by each walker (thermalisation + sampling)
+therm_steps=0.2*num_steps         # Number of thermalisation steps
+
+therm_interval=(therm_steps)/10   # Interval size to adjust step size
+
+```
+
+Chunk 2: Defining functions for sampling and local energy.
+```{r}
+# Function to sample position values from (Psi^2/<Psi|Psi>)
+rho <- function(x,alpha) {
+  return (sqrt(alpha)*exp(-2*alpha*(x^2)))
+}
+
+# Function to calculate local energy
+elocal <- function(x,alpha) {
+  return (alpha + (x^2)*(0.5-(2*(alpha^2))))
+}
+
+# Function force
+F_fp <-function(x,alpha){
+  return(-4*alpha*x)
+}
+
+# Function proposal distribution
+G_fp <-function(x,y,del_t,alpha){
+  power=(y-x-(F_fp(x,alpha)*del_t/2))^2
+  return(exp(-power/(del_t*2))/sqrt(2*pi*del_t))
+}
+```
+
+Chunk 3: Executing variational monte carlo with calculation of local energy and variance.
+```{r}
+alpha = 0.1                       # Initial value of alpha (variable parameter)
+x_total=c()
+E_local_sum_all = c()
+E_local_sqd_sum_all = c()
+alpha_all = c()
+
+accept_rate_all = matrix(0,nrow=num_alphas,ncol = num_walkers)
+
+for (i in seq(num_alphas)){ #For different alphas
+  
+  E_local_sum_one_alpha = 0
+  E_local_sqd_sum_one_alpha = 0
+  alpha_all = c(alpha_all,alpha)
+  
+  for (j in seq(num_walkers))
+    {
+        x_sample=c()
+        x= runif(N_dim,-4,4)            # Initial position of the walker
+        accept = 0
+        
+        for(k in seq(num_steps)){ #To generate r_sample for the walker
+      
+            x_dum=x+(F_fp(x,alpha)*del_t/2)+(rnorm(1)*sqrt(del_t))
+            ratio = (G_fp(x_dum,x,del_t,alpha)*rho(x_dum,alpha))/(G_fp(x,x_dum,del_t,alpha)*rho(x,alpha))
+           
+            if (ratio>=runif(1,0,1)){
+              
+              x_sample = c(x_sample,x_dum)
+              x=x_dum
+              accept = accept + 1
+            
+              }else{x_sample = c(x_sample,x)}
+            if (k<=therm_steps)        #Thermalisation steps
+                  {
+                    if (k%%therm_interval==0) #Changes in step size after uniform intervals
+                          {
+                              accept=max(1,accept)
+                              del_t= del_t*((10/9)*accept/therm_interval)
+                              accept=0
+                          }
+                    }
+            
+            } #one walker
+      
+      E_local_one_walker = elocal(x_sample[(therm_steps+1):num_steps],alpha)    # E_local_all for one particular alpha, all x
+      E_local_sum_one_alpha = E_local_sum_one_alpha + sum(E_local_one_walker)   # Adding all local energy for all x, all walkers
+    
+      E_local_sqd_sum_one_alpha = E_local_sqd_sum_one_alpha + sum(E_local_one_walker * E_local_one_walker)
+    
+      accept_rate_all[i,j]=accept/(num_steps-therm_steps)
+    
+    }#one alpha  
+  
+  E_local_sum_all= c(E_local_sum_all,E_local_sum_one_alpha)  #array containing elocal for different alphas
+  E_local_sqd_sum_all = c(E_local_sqd_sum_all,E_local_sqd_sum_one_alpha) #array containing elocal^2 for diff. alphas
+  
+  cat(i, "of", num_alphas, "alphas calculated.","\n")
+  alpha = alpha + alpha_inc
+}
+
+E_local_var = E_local_sqd_sum_all/(num_walkers*(num_steps-therm_steps)) - (E_local_sum_all/(num_walkers*(num_steps-therm_steps)))^2
+
+E_local_all = E_local_sum_all/(num_walkers*(num_steps-therm_steps))
+std_dev = sqrt(E_local_var)
+error = std_dev/sqrt(num_walkers*(num_steps-therm_steps))
+
+```
+
+Chunk 4: Main plots of our analysis.
+```{r}
+plot(alpha_all,rowMeans(accept_rate_all),xlab="alpha",ylab="Acceptance rate", main = "Acceptance rate vs alpha")
+plot(alpha_all,E_local_var,xlab="alpha",ylab="Variance", main = "Variance vs alpha")
+
+plot(alpha_all,E_local_all,xlab="alpha", ylab="Local Energy",ylim=range(c(E_local_all-error, E_local_all+error)), main = "Local energy vs alpha")
+arrows(alpha_all, E_local_all-error, alpha_all, E_local_all+error , length=0.02, angle=90, code=3)
+
+
+```
