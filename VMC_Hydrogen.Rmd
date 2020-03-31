@@ -1,0 +1,136 @@
+---
+title: "Hydrogen_VMC"
+output: pdf_document
+author: A. Mehta, A. Cheekoti, A. Tayade
+---
+
+Chunk 1: Defining global parameters.
+```{r}
+rm(list=ls())
+N_dim = 1                         # Number of dimensions, can be 3 or 1
+
+alpha_inc = 0.1                  # Incrememnt in alpha values
+num_alphas=10                     # Total number of alphas 
+
+num_walkers=100                   # Number of walkers
+num_steps=10000                   # Number of total steps by each walker (thermalisation + sampling)
+therm_steps=0.2*num_steps         # Number of thermalisation steps
+
+h = 10                          # Initial step size
+therm_interval=(therm_steps)/10   # Interval size to adjust step size
+
+```
+
+Chunk 2: Defining functions for norm of vector, sampling and local energy.
+```{r}
+# Function to calculate norm of a vector
+norm_vec <- function(x) sqrt(sum(x^2))
+
+# Function to sample position values from (Psi^2/<Psi|Psi>)
+rho <- function(x,alpha) {
+  return (norm_vec(x)^(3-N_dim)*exp(-2*alpha*(norm_vec(x)))/(2*alpha))
+}
+
+# Function to calculate local energy
+elocal <- function(x,alpha) {
+  return (-0.5*(alpha^2 - 2*(alpha/x)) - 1/x)
+}
+```
+
+Chunk 3: Executing variational monte carlo with calculation of local energy and variance.
+```{r}
+alpha = 0.5                       # Initial value of alpha (variable parameter)
+
+E_local_sum_all = c()
+E_local_sqd_sum_all = c()
+
+dE_trial_all = c()
+alpha_all = c()
+
+accept_rate_all = matrix(0,nrow=num_alphas,ncol = num_walkers)
+E_trial_all = matrix(0,nrow=num_alphas,ncol = num_walkers)
+
+for (i in seq(num_alphas)){ #For different alphas
+  
+  E_local_sum_one_alpha = 0
+  E_local_sqd_sum_one_alpha = 0
+  alpha_all = c(alpha_all,alpha)
+  
+  cat(i, "of", num_alphas, "alphas calculated.","\n")
+  
+  for (j in seq(num_walkers))
+    {  h=10
+        x_sample=c()
+        x= runif(N_dim,0,100)            # Initial position of the walker
+        accept = 0
+    
+        for(k in seq(num_steps))   # Generate position values for each alpha
+             { 
+      
+              x_dum=x+runif(N_dim,-h/2,h/2)
+              ratio = rho(x_dum,alpha)/rho(x,alpha)
+     
+      
+             if (ratio>=runif(1,0,1))
+                    {
+                         x_sample = c(x_sample,norm_vec(x_dum))
+                         x=x_dum
+                         accept = accept + 1
+                    } else{x_sample = c(x_sample,norm_vec(x))}
+    
+            if (k<=therm_steps)        #Thermalisation steps
+                    {
+              if (k%%therm_interval==0) #Changes in step size after uniform intervals
+                    {
+                        h= h*(2*accept/therm_interval)  #2 is 1/0.5 and 0.5 is our required acceptance rate
+                        accept=0
+                    }
+              }
+      
+         } #one walker
+        E_local_one_walker = elocal(x_sample[(therm_steps+1):num_steps],alpha)    # E_local_all for one particular alpha, all x
+        E_local_sum_one_alpha = E_local_sum_one_alpha + sum(E_local_one_walker)   # Adding all local energy for all x, all walkers
+    
+        E_local_sqd_sum_one_alpha = E_local_sqd_sum_one_alpha + sum(E_local_one_walker * E_local_one_walker)
+    
+    
+        E_trial_all[i,j]= mean(E_local_one_walker)  #old approach
+    
+    
+        accept_rate_all[i,j]=accept/(num_steps-therm_steps)
+    #print(h)
+    }#one alpha  
+  
+  E_local_sum_all= c(E_local_sum_all,E_local_sum_one_alpha)  #array containing elocal for different alphas
+  E_local_sqd_sum_all = c(E_local_sqd_sum_all,E_local_sqd_sum_one_alpha) #array containing elocal^2 for diff. alphas
+  
+  alpha = alpha + alpha_inc
+}
+
+E_local_var = E_local_sqd_sum_all/(num_walkers*(num_steps-therm_steps)) - (E_local_sum_all/(num_walkers*(num_steps-therm_steps)))^2
+
+E_local_all = E_local_sum_all/(num_walkers*(num_steps-therm_steps))
+std_dev = sqrt(E_local_var)
+error = std_dev/sqrt(num_walkers*(num_steps-therm_steps))
+```
+
+Chunk 4: Main plots of our analysis.
+```{r}
+plot(alpha_all,rowMeans(accept_rate_all),xlab="Alpha (variational parameter)",ylab="Acceptance rate", main = "Acceptance rate vs alpha")
+plot(alpha_all,E_local_var,xlab="Alpha (variational parameter)",ylab="Variance", main = "Hydrogen Atom (Variance)")
+
+plot(alpha_all,E_local_all,xlab="Alpha (variational parameter)", ylab="Energy" ,ylim=range(c(E_local_all-error, E_local_all+error)), main = "Hydrogen Atom (Energy) ")
+arrows(alpha_all, E_local_all-error, alpha_all, E_local_all+error , length=0.05, angle=90, code=3)
+
+
+```
+
+Chunk 5: Additional plots for reference.
+```{r}
+hist(x_sample)
+plot(alpha_all,rowMeans(E_trial_all),xlab="alpha",ylab="Mean Local Energy")
+plot(alpha_all,rowMeans(E_trial_all),xlab="alpha",ylab="Mean Local Energy",ylim=range(c(E_local_all-error, E_local_all+errors)))
+arrows(alpha_all, E_local_all-error, alpha_all, E_local_all+error , length=0.05, angle=90, code=3)
+```
+
+
